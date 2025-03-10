@@ -1,27 +1,55 @@
-FROM python:3.9-slim-buster
+FROM python:3.9-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED 1
+# 타임존 설정
+ENV TZ=Asia/Seoul
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-ARG UID=1000
-ARG GID=1000
+# 필요한 시스템 라이브러리 설치 (Chrome과 ChromeDriver 실행에 필요)
+RUN apt-get update && apt-get install -y \
+    wget \
+    unzip \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libpango-1.0-0 \
+    libgbm1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -g "${GID}" python \
-  && useradd --create-home --no-log-init -u "${UID}" -g "${GID}" python
-WORKDIR /home/python
+# Chrome 134.0.6998.35 설치 (zip 파일 방식)
+RUN wget -O /tmp/chrome-linux64.zip "https://storage.googleapis.com/chrome-for-testing-public/134.0.6998.35/linux64/chrome-linux64.zip" && \
+    unzip /tmp/chrome-linux64.zip -d /opt/ && \
+    rm /tmp/chrome-linux64.zip && \
+    ln -s /opt/chrome-linux64/chrome /usr/local/bin/google-chrome && \
+    chmod 755 /usr/local/bin/google-chrome
 
-COPY --chown=python:python requirements.txt requirements.txt
-RUN pip3 install -r requirements.txt
+# ChromeDriver 134.0.6998.35 설치
+RUN wget -O /tmp/chromedriver-linux64.zip "https://storage.googleapis.com/chrome-for-testing-public/134.0.6998.35/linux64/chromedriver-linux64.zip" && \
+    unzip /tmp/chromedriver-linux64.zip -d /usr/local/bin/ && \
+    mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
+    rm -rf /usr/local/bin/chromedriver-linux64 && \
+    rm /tmp/chromedriver-linux64.zip && \
+    chmod 755 /usr/local/bin/chromedriver
 
-# USER 변경은 반드시 pip 패키지 설치 스크립트 이후에 작성되어야 함
-USER python:python
-ENV PATH="/home/${USER}/.local/bin:${PATH}"
-COPY --chown=python:python . .
+WORKDIR /app
 
-ARG FLASK_ENV
+# Python 패키지 설치
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-ENV FLASK_ENV=${FLASK_ENV}
+# 애플리케이션 복사
+COPY . .
 
-EXPOSE 5000
+# 캐시 경로 권한 설정 및 초기화
+RUN mkdir -p /tmp/chrome-data && chmod -R 777 /tmp/chrome-data && \
+    mkdir -p /.cache/selenium && chmod -R 777 /.cache/selenium && \
+    rm -rf /root/.config/google-chrome
 
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
+# 실행
+CMD ["python", "spo13.py"]
